@@ -37,15 +37,15 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
     	if(j <= k){
     		if(tid <= k && tid != k){					// FILLS THE CLASSES ARRAY WITH FIRST FIVE THAT ARENT ITSELF
     			k_distances[tid * k + comp_cnt] = distance;
-    			k_classes[tid * k + comp_cnt] = dataset[tid * attribute_count + attribute_count - 1];
+    			k_classes[tid * k + comp_cnt] = dataset[j * attribute_count + attribute_count - 1];
     			if(distance > largest_array_distance){
     				largest_array_distance = distance;
     				index_largest_distance = comp_cnt;
     			}
     			comp_cnt++;
     		}else{
+    			k_classes[tid * k + j] = dataset[j * attribute_count + attribute_count - 1];
     			k_distances[tid * k + j] = distance;
-    			k_classes[tid * k + j] = dataset[tid * attribute_count + attribute_count - 1];
     			if(distance > largest_array_distance){
     			    largest_array_distance = distance;
     			    index_largest_distance = j;
@@ -98,23 +98,19 @@ int main(int argc, char *argv[])
 
     // Allocate the device input vector A
     int *d_predictions;
-    float *d_distance_calculations; /// maybe get rid of?
-    int *d_arr_class_data;
-    float *d_arr_data;
+    float *d_dataset;
     float *d_Kdist;
     float* d_Kclasses;
 
 
     cudaMalloc(&d_predictions, instance_count * sizeof(int));
-    cudaMalloc(&d_distance_calculations, instance_count *sizeof(float));
-    cudaMalloc(&d_arr_class_data, instance_count * sizeof(int));
-    cudaMalloc(&d_arr_data, instance_count * attribute_count * sizeof(float));
+    cudaMalloc(&d_dataset, instance_count * attribute_count * sizeof(float));
     cudaMalloc(&d_Kdist, k * instance_count * sizeof(float));
     cudaMalloc(&d_Kclasses, k * instance_count * sizeof(float));
 
     // Copy the host input vectors A and B in host memory to the device input vectors in
     cudaMemcpy(d_predictions, h_predictions, instance_count * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_arr_data, h_dataset, instance_count * attribute_count * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dataset, h_dataset, instance_count * attribute_count * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_Kdist, h_Kdist, k * instance_count * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_Kclasses, h_Kclasses, k * instance_count * sizeof(float), cudaMemcpyHostToDevice);
 
@@ -125,14 +121,14 @@ int main(int argc, char *argv[])
     printf("CUDA kernel launch with %d blocks of %d threads\n", blocksPerGrid, threadsPerBlock);
 
     // set k value (number of neighbors)
-    KNN<<<blocksPerGrid, threadsPerBlock>>>(d_predictions, d_arr_data, k, instance_count, attribute_count, d_Kdist, d_Kclasses,class_count);
+    KNN<<<blocksPerGrid, threadsPerBlock>>>(d_predictions, d_dataset, k, instance_count, attribute_count, d_Kdist, d_Kclasses,class_count);
 
     cudaMemcpy(h_predictions, d_predictions, instance_count * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_Kclasses, d_Kclasses, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_Kdist, d_Kdist, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
+    //cudaMemcpy(h_Kdist, d_Kdist, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
 
     for(int i = 0; i < 336 * 5; i++){
-    	cout << h_Kdist[i];
+    	cout << h_Kclasses[i];
     }
 
     /*
