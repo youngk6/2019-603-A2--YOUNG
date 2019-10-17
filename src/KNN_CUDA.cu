@@ -12,7 +12,7 @@
 #include "libarff/arff_data.h"
 using namespace std;
 
-__global__ void KNN(int *predictions, float *dataset, int k, int instance_count, int attribute_count, float *k_distances, float *k_classes, int class_count, long inf)
+__global__ void KNN(int *predictions, float *dataset, int k, int instance_count, int attribute_count, float *k_distances, float *k_classes, int class_count, int * classVotes, long inf)
 {
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -65,10 +65,32 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
     				largest_array_distance = new_largest;
     			}
     		}
-
+    	}
+   	}
+    // VOTE ON CLASS by going through k_classes array (blocks of size k) and incrementing the index position in classValues array
+    if(tid < instance_count){
+    	for(int i = tid * k; i < (tid+1) * k; i++){ // this goes through k_classes
+    		int the_class = k_classes[i];
+    		classVotes[tid * class_count + the_class] += 1;
     	}
 
-   	}
+    	// FIND CLASS WITH MOST VOTES
+    	int max_votes = 0;
+    	int max_votes_index = 0;
+    	for(int i = tid * class_count; i < (tid+1) * class_count; i++){
+    		if(classVotes[i] > max_votes){
+    			max_votes = classVotes[i];
+    			max_votes_index = i % class_count;
+    		}
+    	}
+
+    	predictions[tid] = max_votes_index;
+
+    }
+
+
+
+
 
 }
 
@@ -110,12 +132,15 @@ int main(int argc, char *argv[])
     int *h_predictions = (int *)malloc(instance_count * sizeof(int));
     float* h_Kdist =(float*)calloc(k * instance_count, sizeof(float));
     float* h_Kclasses=(float*)calloc(k * instance_count, sizeof(float));
+    int* h_classVotes = (int*)calloc((attribute_count - 1) * instance_count, sizeof(int));
 
     // Allocate the device input vector A
     int *d_predictions;
     float *d_dataset;
     float *d_Kdist;
     float* d_Kclasses;
+    int* d_classVotes;
+
 
     // infinity
     double inf = std::numeric_limits<double>::infinity();
@@ -125,12 +150,15 @@ int main(int argc, char *argv[])
     cudaMalloc(&d_dataset, instance_count * attribute_count * sizeof(float));
     cudaMalloc(&d_Kdist, k * instance_count * sizeof(float));
     cudaMalloc(&d_Kclasses, k * instance_count * sizeof(float));
+    cudaMalloc(&d_classVotes, (attribute_count - 1) * instance_count * sizeof(int));
+
 
     // Copy the host input vectors A and B in host memory to the device input vectors in
     cudaMemcpy(d_predictions, h_predictions, instance_count * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_dataset, h_dataset, instance_count * attribute_count * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_Kdist, h_Kdist, k * instance_count * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_Kclasses, h_Kclasses, k * instance_count * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_classVotes, h_classVotes, (attribute_count - 1) * instance_count * sizeof(int), cudaMemcpyHostToDevice);
 
     // Launch the Vector Add CUDA Kernel
     int threadsPerBlock = 256;
@@ -139,22 +167,17 @@ int main(int argc, char *argv[])
     printf("CUDA kernel launch with %d blocks of %d threads\n", blocksPerGrid, threadsPerBlock);
 
     // set k value (number of neighbors)
-    KNN<<<blocksPerGrid, threadsPerBlock>>>(d_predictions, d_dataset, k, instance_count, attribute_count, d_Kdist, d_Kclasses,class_count, inf);
+    KNN<<<blocksPerGrid, threadsPerBlock>>>(d_predictions, d_dataset, k, instance_count, attribute_count, d_Kdist, d_Kclasses, class_count, d_classVotes, inf);
 
     cudaMemcpy(h_predictions, d_predictions, instance_count * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_Kclasses, d_Kclasses, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_Kdist, d_Kdist, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
-
-    int icount = 0;
-    for(int i = 0; i < 5 * 5; i++){
-    	cout << h_Kdist[i] << endl;
-    	icount++;
-    }
+    cudaMemcpy(h_classVotes, d_classVotes, (attribute_count - 1) * instance_count * sizeof(int), cudaMemcpyDeviceToHost);
 
     cout << endl;
-    for(int i = 0; i < 336 * 5; i++){
-    	cout << h_Kclasses[i];
-    }
+    for(int i = 0; i < 336; i++){
+    	cout << h_predictions[i];
+     }
 
     /*
 
