@@ -8,6 +8,10 @@
 
 #include <iostream>
 #include <limits>
+#include <stdlib.h>
+#include <stdint.h>
+#include <float.h>
+#include <math.h>
 #include "libarff/arff_parser.h"
 #include "libarff/arff_data.h"
 using namespace std;
@@ -88,11 +92,39 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
 
     }
 
-
-
-
-
 }
+
+
+int* computeConfusionMatrix(int* predictions, ArffData* dataset)
+{
+    int* confusionMatrix = (int*)calloc(dataset->num_classes() * dataset->num_classes(), sizeof(int)); // matriz size numberClasses x numberClasses
+
+    for(int i = 0; i < dataset->num_instances(); i++) // for each instance compare the true class and predicted class
+    {
+        int trueClass = dataset->get_instance(i)->get(dataset->num_attributes() - 1)->operator int32();
+        //cout << trueClass;
+        int predictedClass = predictions[i];
+        //cout << predictedClass;
+
+        confusionMatrix[trueClass*dataset->num_classes() + predictedClass]++;
+    }
+
+    return confusionMatrix;
+}
+
+float computeAccuracy(int* confusionMatrix, ArffData* dataset)
+{
+    int successfulPredictions = 0;
+
+    for(int i = 0; i < dataset->num_classes(); i++)
+    {
+        successfulPredictions += confusionMatrix[i*dataset->num_classes() + i]; // elements in the diagonal are correct predictions
+    }
+
+    return successfulPredictions / (float) dataset->num_instances();
+}
+
+
 
 int main(int argc, char *argv[])
 {
@@ -174,21 +206,12 @@ int main(int argc, char *argv[])
     cudaMemcpy(h_Kdist, d_Kdist, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_classVotes, d_classVotes, (attribute_count - 1) * instance_count * sizeof(int), cudaMemcpyDeviceToHost);
 
-    cout << endl;
-    for(int i = 0; i < 336; i++){
-    	cout << h_predictions[i];
-     }
-
-    /*
-
-    int* predictions = KNN(dataset, 5);
-    int* confusionMatrix = computeConfusionMatrix(predictions, dataset);
+    int* confusionMatrix = computeConfusionMatrix(h_predictions, dataset);
     float accuracy = computeAccuracy(confusionMatrix, dataset);
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &end);
     uint64_t diff = (1000000000L * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec) / 1e6;
 
     printf("The KNN classifier for %lu instances required %llu ms CPU time, accuracy was %.4f\n", dataset->num_instances(), (long long unsigned int) diff, accuracy);
-	*/
 }
 
