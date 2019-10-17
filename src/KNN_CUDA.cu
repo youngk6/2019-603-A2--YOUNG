@@ -11,7 +11,7 @@
 #include "libarff/arff_data.h"
 using namespace std;
 
-__global__ void KNN(int *predictions, float *dataset, int *classes, float *distance_calculations, int k_neighbors, int num_elements, int num_attributes, float *Arr_dist, int *Arr_classes)
+__global__ void KNN(int *predictions, float *dataset, int k, int instance_count, int attribute_count, float *k_distances, float *k_classes, int class_count)
 {
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -19,52 +19,46 @@ __global__ void KNN(int *predictions, float *dataset, int *classes, float *dista
     int index_largest_distance;
 
     //for loop to look at other instances in array
-    for(int j = 0; j < num_elements; j++){
+    // j is the instance being compared to.
+    int comp_cnt = 0;
+    for(int j = 0; j < instance_count; j++){
     	if(j == tid) continue;
 
     	float distance = 0;
-    	// dataset has 7 attributes per instance
-    	// each instance is in a class
-    	// to get beginning of a class, 7 * tid
 
-    	for(int k = 0; k < num_attributes; k++){ // compute distance between two instances
-    		// compare thread attribute k with other thread attribute k
-    		float diff = dataset[tid * num_attributes + k] - dataset[j * num_attributes + k];
+    	// CALCULATE DISTANCE BETWEEN J INSTANCE AND TID INSTANCE via ATTRIBUTES "D"
+    	for(int d = 0; d < attribute_count - 1; d++){ // compute distance between two instances
+    		float diff = dataset[tid * attribute_count + d] - dataset[j * attribute_count + d];
     		distance += diff * diff;
     	}
     	distance = sqrt(distance);
 
+    	// PLACE DISTANCES AND CLASSES INTO ARRAYS
+    	if(j <= k){
+    		if(tid <= k && tid != k){
+    			// FILLS THE CLASSES ARRAY WITH FIRST FIVE THAT ARENT ITSELF
+    			k_classes[tid * k + comp_cnt] = dataset[tid * attribute_count + attribute_count - 1];
+    			comp_cnt++;
+    		}else{
+    			k_classes[tid * k + j] = dataset[tid * attribute_count + attribute_count - 1];
+    		}
+
+
+    	}
+
+
 
 	    // THIS IS INITIALIZING ARRAY AUTOMATICALLY WITH FIRST K VALUES. Get a starting point.
+    	/*
 	    if(j < k_neighbors){
-                Arr_dist[j] = distance; //put distance in
-                Arr_classes[j] = classes[j]; // put class in
-                if(distance > largest_array_distance){ // keep track of largest distance in array
-                	largest_array_distance = distance;
-                	index_largest_distance = j;
-                }
-	    }
-
-	    if(j >= k_neighbors){
-	    		if(distance < largest_array_distance){ // IF THERE IS A CLOSER NEIGHBOR THAT SHOULD BE IN ARRAY
-	    		    Arr_dist[index_largest_distance] = distance; // change the distance, then add the class
-	    		    Arr_classes[index_largest_distance] = classes[j];
-	    		    //FIND NEW LARGEST DISTANCE
-	    		    float new_largest = 0;
-	    		    int new_largest_index;
-	    		    for(int r = 0; r < k_neighbors; r++){
-	    		    	float temp = Arr_dist[r];
-	    		    	if(temp > new_largest){
-	    		    		new_largest = temp;
-	    		    		new_largest_index = r;
-	    		    	}
-	     		    }
-	    		    largest_array_distance = new_largest;
-	    		    index_largest_distance  = new_largest_index;
-	    		}
-	    }
-
-	    //next vote on class and update predictions.
+                k_distances[tid * k_neighbors + j] = distance; //put distance in
+                k_classes[tid * k_neighbors + j] = classes[j]; // put class in
+                // up to here...
+                //if(distance > largest_array_distance){ // keep track of largest distance in array
+                //	largest_array_distance = distance;
+                //	index_largest_distance = j;
+                //}
+	    }*/
 
 
     }
@@ -79,30 +73,23 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
-    // get dataset
+    // READ IN DATASET
     ArffParser parser(argv[1]);
     ArffData *dataset = parser.parse();
 
-    // create 1D array of the data (without classes)
-    int num_elements = dataset->num_instances();
-    int total_attributes = dataset->num_attributes();
+    // GET METRICS FROM DATASET
+    int instance_count = dataset->num_instances();
+    int attribute_count = dataset->num_attributes();
+    int class_count = dataset->num_classes();
 
-    float *h_arr_data = (float *)malloc(num_elements * total_attributes * sizeof(float));
+    // MAKE DATASET INTO 1D ARRAY
+    float *h_dataset = (float *)malloc(instance_count * attribute_count * sizeof(float));
     int count = 0;
-    for (int i = 0; i < num_elements; i++){
-    	for (int j = 0; j < total_attributes - 1; j++){
-    		h_arr_data[count] = dataset->get_instance(i)->get(j)->operator float();
+    for (int i = 0; i < instance_count; i++){
+    	for (int j = 0; j < attribute_count; j++){
+    		h_dataset[count] = dataset->get_instance(i)->get(j)->operator float();
     		count++;
     	}
-    }
-
-    // create 1D array of classes for each instance
-    count = 0;
-    int *h_arr_class_data = (int *)malloc(num_elements * sizeof(int));
-
-    for(int i = 0; i < num_elements; i++){
-    	h_arr_class_data[count] = dataset->get_instance(i)->get(dataset->num_attributes()-1)->operator long int();
-    	count++;
     }
 
     // start clock
@@ -113,45 +100,47 @@ int main(int argc, char *argv[])
     int k = 5;
 
     // Allocate other host memory
-    int *h_predictions = (int *)malloc(num_elements * sizeof(int));
-    float * h_distance_calculations = (float *)calloc(num_elements, sizeof(float));
-    float* h_Arr_dist =(float*)calloc(k, sizeof(float));
-    int* h_Arr_classes=(int*)calloc(k, sizeof(int));
+    int *h_predictions = (int *)malloc(instance_count * sizeof(int));
+    float* h_Kdist =(float*)calloc(k * instance_count, sizeof(float));
+    float* h_Kclasses=(float*)calloc(k * instance_count, sizeof(float));
 
     // Allocate the device input vector A
     int *d_predictions;
     float *d_distance_calculations; /// maybe get rid of?
     int *d_arr_class_data;
     float *d_arr_data;
-    float *d_Arr_dist;
-    int* d_Arr_classes;
+    float *d_Kdist;
+    float* d_Kclasses;
 
 
-    cudaMalloc(&d_predictions, num_elements * sizeof(int));
-    cudaMalloc(&d_distance_calculations, num_elements *sizeof(float));
-    cudaMalloc(&d_arr_class_data, num_elements * sizeof(int));
-    cudaMalloc(&d_arr_data, num_elements * total_attributes * sizeof(float));
-    cudaMalloc(&d_Arr_dist, k * sizeof(float));
-    cudaMalloc(&d_Arr_classes, k * sizeof(int));
+    cudaMalloc(&d_predictions, instance_count * sizeof(int));
+    cudaMalloc(&d_distance_calculations, instance_count *sizeof(float));
+    cudaMalloc(&d_arr_class_data, instance_count * sizeof(int));
+    cudaMalloc(&d_arr_data, instance_count * attribute_count * sizeof(float));
+    cudaMalloc(&d_Kdist, k * instance_count * sizeof(float));
+    cudaMalloc(&d_Kclasses, k * instance_count * sizeof(float));
 
     // Copy the host input vectors A and B in host memory to the device input vectors in
-    cudaMemcpy(d_predictions, h_predictions, num_elements * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_distance_calculations, h_distance_calculations, num_elements *sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_arr_class_data, h_arr_class_data, num_elements * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_arr_data, h_arr_data, num_elements * total_attributes * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_Arr_dist, h_Arr_dist, k * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_Arr_classes, h_Arr_classes, k * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_predictions, h_predictions, instance_count * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_arr_data, h_dataset, instance_count * attribute_count * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Kdist, h_Kdist, k * instance_count * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_Kclasses, h_Kclasses, k * instance_count * sizeof(float), cudaMemcpyHostToDevice);
 
     // Launch the Vector Add CUDA Kernel
     int threadsPerBlock = 256;
-    int blocksPerGrid = (num_elements + threadsPerBlock - 1) / threadsPerBlock;
+    int blocksPerGrid = (instance_count + threadsPerBlock - 1) / threadsPerBlock;
 
     printf("CUDA kernel launch with %d blocks of %d threads\n", blocksPerGrid, threadsPerBlock);
 
     // set k value (number of neighbors)
-    KNN<<<blocksPerGrid, threadsPerBlock>>>(d_predictions, d_arr_data, d_arr_class_data, d_distance_calculations, k, num_elements, total_attributes, d_Arr_dist, d_Arr_classes);
+    KNN<<<blocksPerGrid, threadsPerBlock>>>(d_predictions, d_arr_data, k, instance_count, attribute_count, d_Kdist, d_Kclasses,class_count);
 
-    cudaMemcpy(h_predictions, d_predictions, num_elements * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_predictions, d_predictions, instance_count * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_Kclasses, d_Kclasses, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
+
+    for(int i = 0; i < 336 * 5; i++){
+    	cout << h_Kclasses[i];
+    }
 
     /*
 
