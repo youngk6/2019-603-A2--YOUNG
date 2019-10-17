@@ -7,11 +7,12 @@
 //============================================================================
 
 #include <iostream>
+#include <limits>
 #include "libarff/arff_parser.h"
 #include "libarff/arff_data.h"
 using namespace std;
 
-__global__ void KNN(int *predictions, float *dataset, int k, int instance_count, int attribute_count, float *k_distances, float *k_classes, int class_count)
+__global__ void KNN(int *predictions, float *dataset, int k, int instance_count, int attribute_count, float *k_distances, float *k_classes, int class_count, long inf)
 {
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -22,7 +23,6 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
     // j is the instance being compared to.
     int comp_cnt = 0;
     for(int j = 0; j < instance_count; j++){
-    	if(j == tid) continue;
 
     	float distance = 0;
 
@@ -35,51 +35,40 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
 
     	// PLACE DISTANCES AND CLASSES INTO ARRAYS FOR FIRST 5 - 6 INSTANCES DEPENDING ON CASE
     	if(tid < instance_count){
-    		if(j <= k){
-    			if(tid < k){					// FILLS THE CLASSES ARRAY WITH FIRST FIVE THAT ARENT ITSELF
-    				k_distances[tid * k + comp_cnt] = distance;
-    				k_classes[tid * k + comp_cnt] = dataset[j * attribute_count + attribute_count - 1];
-    		    		if(distance > largest_array_distance){
-    		    			largest_array_distance = distance;
-    		    			index_largest_distance = comp_cnt;
-    		    		}
-    		    	comp_cnt++;
-    		    }else if (tid >= k){
-    		    	k_classes[tid * k + j] = dataset[j * attribute_count + attribute_count - 1];
-    		    	k_distances[tid * k + j] = distance;
-    		    	if(distance > largest_array_distance){
-    		    		largest_array_distance = distance;
-    		    		index_largest_distance = j;
-    		    	}
-    		    }
+    		if(j < k){
+    			k_classes[tid * k + j] = dataset[j * attribute_count + attribute_count - 1];
+    			if (tid == j)
+    				distance = inf; // set value to infinity because the instance shouldn't include itself in k
+    			k_distances[tid * k + j] = distance;
+    			if(distance > largest_array_distance){
+    				largest_array_distance = distance;
+    				index_largest_distance = j; // index is a value 0 - 4 in the case k = 5
+    			}
     		}
 
-    		// SWAPPING VALUES AS NEEDED
-
+    		if(j >= k){
+    			if (distance < largest_array_distance){
+    				k_distances[tid * k + index_largest_distance] = distance; // replace the largest distance with the smaller one
+    				k_classes[tid * k + index_largest_distance] = dataset[j * attribute_count + attribute_count - 1]; // set class of replaced
+    				// Find new largest distance
+    				float new_largest = 0;
+    				float new_largest_index;
+    				//look through the k values and find the largest distance
+    				for(int i = tid * k; i < (tid+1) * k; i++){
+    					float temp = k_distances[i];
+    					if(temp > new_largest){
+    						new_largest = temp;
+    						new_largest_index = i % k; // put back in the range of 0-4 in the case of k = 5
+    					}
+    				}
+    				index_largest_distance = new_largest_index;
+    				largest_array_distance = new_largest;
+    			}
+    		}
 
     	}
 
-
-    	/*if(j <= k){
-    		if(tid <= k && tid != k){					// FILLS THE CLASSES ARRAY WITH FIRST FIVE THAT ARENT ITSELF
-    			k_distances[tid * k + comp_cnt] = distance;
-    			k_classes[tid * k + comp_cnt] = dataset[j * attribute_count + attribute_count - 1];
-    			if(distance > largest_array_distance){
-    				largest_array_distance = distance;
-    				index_largest_distance = comp_cnt;
-    			}
-    			comp_cnt++;
-    		}else if (tid > k){
-    			k_classes[tid * k + j] = dataset[j * attribute_count + attribute_count - 1];
-    			k_distances[tid * k + j] = distance;
-    			if(distance > largest_array_distance){
-    			    largest_array_distance = distance;
-    			    index_largest_distance = j;
-    			 }
-    		}
-    	}*/
-
-    }
+   	}
 
 }
 
@@ -128,6 +117,9 @@ int main(int argc, char *argv[])
     float *d_Kdist;
     float* d_Kclasses;
 
+    // infinity
+    double inf = std::numeric_limits<double>::infinity();
+
 
     cudaMalloc(&d_predictions, instance_count * sizeof(int));
     cudaMalloc(&d_dataset, instance_count * attribute_count * sizeof(float));
@@ -147,15 +139,15 @@ int main(int argc, char *argv[])
     printf("CUDA kernel launch with %d blocks of %d threads\n", blocksPerGrid, threadsPerBlock);
 
     // set k value (number of neighbors)
-    KNN<<<blocksPerGrid, threadsPerBlock>>>(d_predictions, d_dataset, k, instance_count, attribute_count, d_Kdist, d_Kclasses,class_count);
+    KNN<<<blocksPerGrid, threadsPerBlock>>>(d_predictions, d_dataset, k, instance_count, attribute_count, d_Kdist, d_Kclasses,class_count, inf);
 
     cudaMemcpy(h_predictions, d_predictions, instance_count * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_Kclasses, d_Kclasses, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_Kdist, d_Kdist, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
 
     int icount = 0;
-    for(int i = 0; i < 336 * 5; i++){
-    	cout << h_Kdist[i];
+    for(int i = 0; i < 5 * 5; i++){
+    	cout << h_Kdist[i] << endl;
     	icount++;
     }
 
