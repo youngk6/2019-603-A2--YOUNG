@@ -34,7 +34,33 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
     	distance = sqrt(distance);
 
     	// PLACE DISTANCES AND CLASSES INTO ARRAYS FOR FIRST 5 - 6 INSTANCES DEPENDING ON CASE
-    	if(j <= k){
+    	if(tid < instance_count){
+    		if(j <= k){
+    			if(tid < k){					// FILLS THE CLASSES ARRAY WITH FIRST FIVE THAT ARENT ITSELF
+    				k_distances[tid * k + comp_cnt] = distance;
+    				k_classes[tid * k + comp_cnt] = dataset[j * attribute_count + attribute_count - 1];
+    		    		if(distance > largest_array_distance){
+    		    			largest_array_distance = distance;
+    		    			index_largest_distance = comp_cnt;
+    		    		}
+    		    	comp_cnt++;
+    		    }else if (tid >= k){
+    		    	k_classes[tid * k + j] = dataset[j * attribute_count + attribute_count - 1];
+    		    	k_distances[tid * k + j] = distance;
+    		    	if(distance > largest_array_distance){
+    		    		largest_array_distance = distance;
+    		    		index_largest_distance = j;
+    		    	}
+    		    }
+    		}
+
+    		// SWAPPING VALUES AS NEEDED
+
+
+    	}
+
+
+    	/*if(j <= k){
     		if(tid <= k && tid != k){					// FILLS THE CLASSES ARRAY WITH FIRST FIVE THAT ARENT ITSELF
     			k_distances[tid * k + comp_cnt] = distance;
     			k_classes[tid * k + comp_cnt] = dataset[j * attribute_count + attribute_count - 1];
@@ -43,7 +69,7 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
     				index_largest_distance = comp_cnt;
     			}
     			comp_cnt++;
-    		}else{
+    		}else if (tid > k){
     			k_classes[tid * k + j] = dataset[j * attribute_count + attribute_count - 1];
     			k_distances[tid * k + j] = distance;
     			if(distance > largest_array_distance){
@@ -51,7 +77,7 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
     			    index_largest_distance = j;
     			 }
     		}
-    	}
+    	}*/
 
     }
 
@@ -125,8 +151,15 @@ int main(int argc, char *argv[])
 
     cudaMemcpy(h_predictions, d_predictions, instance_count * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_Kclasses, d_Kclasses, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
-    //cudaMemcpy(h_Kdist, d_Kdist, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_Kdist, d_Kdist, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
 
+    int icount = 0;
+    for(int i = 0; i < 336 * 5; i++){
+    	cout << h_Kdist[i];
+    	icount++;
+    }
+
+    cout << endl;
     for(int i = 0; i < 336 * 5; i++){
     	cout << h_Kclasses[i];
     }
