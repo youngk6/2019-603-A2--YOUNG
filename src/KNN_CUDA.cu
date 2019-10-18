@@ -25,7 +25,6 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
 
     //for loop to look at other instances in array
     // j is the instance being compared to.
-    int comp_cnt = 0;
     for(int j = 0; j < instance_count; j++){
 
     	float distance = 0;
@@ -51,7 +50,7 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
     		}
 
     		if(j >= k){
-    			if (distance < largest_array_distance){
+    			if (distance < largest_array_distance && tid != j){
     				k_distances[tid * k + index_largest_distance] = distance; // replace the largest distance with the smaller one
     				k_classes[tid * k + index_largest_distance] = dataset[j * attribute_count + attribute_count - 1]; // set class of replaced
     				// Find new largest distance
