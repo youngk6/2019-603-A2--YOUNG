@@ -16,12 +16,16 @@
 #include "libarff/arff_data.h"
 using namespace std;
 
-__global__ void KNN(int *predictions, float *dataset, int k, int instance_count, int attribute_count, float *k_distances, float *k_classes, int class_count, int * classVotes, long inf)
+
+
+__global__ void KNN(float *dataset, int k, int instance_count, int attribute_count, float *k_distances, float *k_classes, long inf)
 {
+
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
 
     float largest_array_distance = 0;
     int index_largest_distance;
+
 
     //for loop to look at other instances in array
     // j is the instance being compared to.
@@ -70,28 +74,35 @@ __global__ void KNN(int *predictions, float *dataset, int k, int instance_count,
     		}
     	}
    	}
-    // VOTE ON CLASS by going through k_classes array (blocks of size k) and incrementing the index position in classValues array
-    if(tid < instance_count){
-    	for(int i = tid * k; i < (tid+1) * k; i++){ // this goes through k_classes
-    		int the_class = k_classes[i];
-    		classVotes[tid * class_count + the_class] += 1;
-    	}
-
-    	// FIND CLASS WITH MOST VOTES
-    	int max_votes = 0;
-    	int max_votes_index = 0;
-    	for(int i = tid * class_count; i < (tid+1) * class_count; i++){
-    		if(classVotes[i] > max_votes){
-    			max_votes = classVotes[i];
-    			max_votes_index = i % class_count;
-    		}
-    	}
-
-    	predictions[tid] = max_votes_index;
-
-    }
 
 }
+
+__global__ void VoteOnClass(int instance_count, int class_count, int k, float * k_classes, int * classVotes, int * predictions){
+	// VOTE ON CLASS by going through k_classes array (blocks of size k) and incrementing the index position in classValues array
+	int tid = blockDim.x * blockIdx.x + threadIdx.x;
+	if(tid < instance_count){
+	    for(int i = tid * k; i < (tid+1) * k; i++){ // this goes through k_classes
+	    	int the_class = k_classes[i];
+	    	classVotes[tid * class_count + the_class] += 1;
+	    }
+
+	    // FIND CLASS WITH MOST VOTES
+	    int max_votes = 0;
+	    int max_votes_index = 0;
+	    for(int i = tid * class_count; i < (tid+1) * class_count; i++){
+	    	if(classVotes[i] > max_votes){
+	    		max_votes = classVotes[i];
+	    		max_votes_index = i % class_count;
+	    	}
+	    }
+
+	    predictions[tid] = max_votes_index;
+
+	}
+
+
+}
+
 
 
 int* computeConfusionMatrix(int* predictions, ArffData* dataset)
@@ -197,7 +208,8 @@ int main(int argc, char *argv[])
     printf("CUDA kernel launch with %d blocks of %d threads\n", blocksPerGrid, threadsPerBlock);
 
     // set k value (number of neighbors)
-    KNN<<<blocksPerGrid, threadsPerBlock>>>(d_predictions, d_dataset, k, instance_count, attribute_count, d_Kdist, d_Kclasses, class_count, d_classVotes, inf);
+    KNN<<<blocksPerGrid, threadsPerBlock>>>(d_dataset, k, instance_count, attribute_count, d_Kdist, d_Kclasses, inf);
+    VoteOnClass<<<blocksPerGrid, threadsPerBlock>>>(instance_count, class_count, k, d_Kclasses, d_classVotes, d_predictions);
 
     cudaMemcpy(h_predictions, d_predictions, instance_count * sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_Kclasses, d_Kclasses, k* instance_count * sizeof(float), cudaMemcpyDeviceToHost);
