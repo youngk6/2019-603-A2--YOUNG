@@ -102,9 +102,8 @@ int* computeConfusionMatrix(int* predictions, ArffData* dataset)
     for(int i = 0; i < dataset->num_instances(); i++) // for each instance compare the true class and predicted class
     {
         int trueClass = dataset->get_instance(i)->get(dataset->num_attributes() - 1)->operator int32();
-        //cout << trueClass;
+
         int predictedClass = predictions[i];
-        //cout << predictedClass;
 
         confusionMatrix[trueClass*dataset->num_classes() + predictedClass]++;
     }
@@ -128,7 +127,7 @@ float computeAccuracy(int* confusionMatrix, ArffData* dataset)
 
 int main(int argc, char *argv[])
 {
-    if(argc != 2)
+    if(argc != 3)
     {
         cout << "Usage: ./main datasets/datasetFile.arff" << endl;
         exit(0);
@@ -158,7 +157,7 @@ int main(int argc, char *argv[])
     clock_gettime(CLOCK_MONOTONIC_RAW, &start);
 
     // SET K
-    int k = 5;
+    int k = atoi(argv[2]);
 
     // Allocate other host memory
     int *h_predictions = (int *)malloc(instance_count * sizeof(int));
